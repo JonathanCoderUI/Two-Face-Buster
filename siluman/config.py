@@ -16,21 +16,25 @@ REFERER_GOOGLE = "https://www.google.com/"
 
 # TODO 4:
 # Header untuk tiap persona: browser, googlebot, dari_google (browser + Referer Google).
-PERSONA = ...
+PERSONA = {
+    "browser": {"User-Agent": UA_BROWSER},
+    "googlebot": {"User-Agent": UA_GOOGLEBOT},
+    "dari_google": {"User-Agent": UA_BROWSER, "Referer": REFERER_GOOGLE},
+}
 
 # TODO 5:
 # Urutan kunjungan persona. dari_google dikunjungi paling awal.
-URUTAN_PERSONA = ...
+URUTAN_PERSONA = ["dari_google", "googlebot", "browser"]
 
 # TODO 6:
 # Batas sopan: jeda per domain minimal 1 detik, maksimal 50 domain bersamaan,
 # batas waktu, batas ukuran HTML, batas lompatan redirect di situs yang sama.
-JEDA_PER_DOMAIN = ...
-MAKS_DOMAIN_BERSAMAAN = ...
-TIMEOUT_DETIK = ...
-BATAS_UKURAN = ...
-MAKS_LOMPATAN_REDIRECT = ...
+JEDA_PER_DOMAIN = 1.0
+MAKS_DOMAIN_BERSAMAAN = 50
+TIMEOUT_DETIK = 20
+BATAS_UKURAN = 2_000_000
+MAKS_LOMPATAN_REDIRECT = 5
 
 # TODO 7:
 # Lokasi database bersama (dipakai main.py dan dashboard.py).
-LOKASI_DB = ...
+LOKASI_DB = "data/siluman.db"

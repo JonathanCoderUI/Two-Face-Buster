@@ -2,6 +2,7 @@
 
 # Pemilik: Penjelajah. Rujukan: Panduan hlm. 16-21.
 
+from urllib.parse import urlsplit
 
 def host_dari(url):
     """Kembalikan host URL tanpa www., atau "" kalau URL-nya rusak."""

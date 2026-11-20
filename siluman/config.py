@@ -4,15 +4,15 @@
 
 # TODO 1:
 # User-Agent browser, salin dari chrome://version di laptopmu sendiri.
-UA_BROWSER = ...
+UA_BROWSER = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36"
 
 # TODO 2:
 # User-Agent Googlebot dari dokumentasi crawler Google.
-UA_GOOGLEBOT = ...
+UA_GOOGLEBOT = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/157.0.0.0 Safari/537.36"
 
 # TODO 3:
 # Referer yang dipakai persona dari_google.
-REFERER_GOOGLE = ...
+REFERER_GOOGLE = "https://www.google.com/"
 
 # TODO 4:
 # Header untuk tiap persona: browser, googlebot, dari_google (browser + Referer Google).

@@ -4,11 +4,23 @@
 
 import pytest
 
+from siluman.fitur import ekstrak_teks, kemiripan
 
-@pytest.mark.skip(reason="TODO: belum ditulis")
+
 def test_kemiripan_teks_identik():
-    # TODO 1: dua teks yang sama persis bernilai 1.
-    ...
+    teks = "Penerimaan peserta didik baru dibuka tanggal 1 Juni"
+    assert kemiripan(teks, teks) == 1.0
+
+
+def test_kemiripan_dihitung_per_kata():
+    # Blok cocok: "kucing" dan "di atas" -> M = 3, T = 10, rasio 2 x 3 / 10.
+    a = "kucing tidur di atas sofa"
+    b = "kucing duduk di atas meja"
+    assert abs(kemiripan(a, b) - 0.6) < 0.001
+
+
+def test_kemiripan_teks_berbeda_total():
+    assert kemiripan("berita sekolah hari ini", "slot gacor maxwin") == 0.0
 
 
 @pytest.mark.skip(reason="TODO: belum ditulis")
@@ -17,10 +29,25 @@ def test_kemiripan_situs_uji(alamat_uji):
     ...
 
 
-@pytest.mark.skip(reason="TODO: belum ditulis")
 def test_ekstrak_teks_ambil_meta_buang_script():
-    # TODO 3: meta description ikut terambil, isi script dan style tidak.
-    ...
+    html = (
+        "<html><head><title>SMA Contoh</title>"
+        '<meta name="description" content="Situs resmi sekolah">'
+        "<style>body { color: red }</style></head>"
+        "<body><h1>Berita</h1>\n\n<p>Upacara   hari Senin</p>"
+        "<script>var rahasia = 'jangan terbaca';</script></body></html>"
+    )
+    teks = ekstrak_teks(html)
+    assert teks == "SMA Contoh Situs resmi sekolah Berita Upacara hari Senin"
+
+
+def test_ekstrak_teks_tanpa_judul_dan_meta():
+    assert ekstrak_teks("<p>Hanya isi</p>") == "Hanya isi"
+
+
+def test_ekstrak_teks_kosong():
+    assert ekstrak_teks("") == ""
+    assert ekstrak_teks(None) == ""
 
 
 @pytest.mark.skip(reason="TODO: Minggu 2")

@@ -20,10 +20,10 @@ def host_dari(url):
     return host
 
 def situs_sama(a, b):
-    """True kalau dua host milik situs yang sama, termasuk subdomainnya."""
-    # TODO 2 (Minggu 1):
-    # Dipakai fitur.py, skor.py, dan bukti.py. Kabari dua anggota lain sebelum mengubahnya.
-    return host_dari(a) == host_dari(b)
+    ha, hb = host_dari(a), host_dari(b)
+    if not ha or not hb:
+        return False
+    return ha == hb or ha.endswith("." + hb) or hb.endswith("." + ha)
 
 async def ambil(session, url, persona, putaran):
     """Satu kunjungan ke satu URL sebagai satu persona; galat dicatat, tidak dilempar."""

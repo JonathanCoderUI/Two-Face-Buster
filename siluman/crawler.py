@@ -11,14 +11,12 @@ import datetime
 from . import config  # Biar bisa akses PERSONA, TIMEOUT, dll
 
 def host_dari(url):
-    """Kembalikan host URL tanpa www., atau "" kalau URL-nya rusak."""
-    # TODO 1 (Minggu 1):
-    # Dipakai fitur.py, skor.py, dan bukti.py. Kabari dua anggota lain sebelum mengubahnya.
-    host = urlsplit(url).hostname or ""
-
+    try:
+        host = urlsplit(url).hostname or ""
+    except ValueError:
+        return ""
     if host.startswith("www."):
         host = host[4:]
-
     return host
 
 def situs_sama(a, b):

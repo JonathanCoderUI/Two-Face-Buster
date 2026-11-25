@@ -3,13 +3,30 @@
 # Pemilik: Detektif.
 
 import difflib
+from urllib.parse import urlsplit
 
 from bs4 import BeautifulSoup
 
-from siluman.normalisasi import rapikan_spasi
+from siluman.normalisasi import normalisasi, rapikan_spasi
 
 # Isinya kode, bukan teks yang dibaca pengunjung atau mesin pencari.
 TAG_DIBUANG = ["script", "style"]
+
+# Kata yang hampir selalu berarti judi kalau muncul di nama domain.
+# Kata pendek seperti "bet" sengaja tidak dimasukkan karena sering muncul di
+# kata biasa (misalnya alphabet).
+KATA_DOMAIN_JUDOL = [
+    "slot",
+    "gacor",
+    "maxwin",
+    "togel",
+    "judi",
+    "casino",
+    "kasino",
+    "poker",
+    "jackpot",
+    "scatter",
+]
 
 
 def ekstrak_teks(html):
@@ -80,5 +97,15 @@ def skrip_pengalih_referrer(html):
 
 def nama_domain_berbau_judol(url):
     """True kalau nama domain URL mengandung kata berbau judol seperti slot atau gacor."""
-    # TODO 5 (Minggu 2)
-    ...
+    if url == None or url == "":
+        return False
+    # Hanya nama host yang diperiksa; kata "slot" di path situs sekolah bukan tanda.
+    host = urlsplit(url).hostname
+    if host == None:
+        return False
+    # Dilipat dengan normalisasi yang sama supaya samaran seperti s1otgac0r.com tetap kena.
+    host_lipat = normalisasi(host)
+    for kata in KATA_DOMAIN_JUDOL:
+        if normalisasi(kata) in host_lipat:
+            return True
+    return False

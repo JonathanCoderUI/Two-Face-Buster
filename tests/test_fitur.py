@@ -4,7 +4,7 @@
 
 import pytest
 
-from siluman.fitur import ekstrak_teks, kemiripan
+from siluman.fitur import ekstrak_teks, kemiripan, nama_domain_berbau_judol
 
 
 def test_kemiripan_teks_identik():
@@ -66,3 +66,28 @@ def test_menu_tersembunyi_biasa_diabaikan():
 def test_skrip_pengalih_tertangkap():
     # TODO 6: skrip yang membaca document.referrer lalu memindahkan halaman tertangkap.
     ...
+
+
+def test_domain_berbau_judol_tertangkap():
+    assert nama_domain_berbau_judol("https://slot-gacor88.com/daftar") == True
+    assert nama_domain_berbau_judol("http://TOGEL4D.NET") == True
+    assert nama_domain_berbau_judol("https://slot.kampus-contoh.ac.id/") == True
+
+
+def test_domain_judol_samaran_tetap_tertangkap():
+    assert nama_domain_berbau_judol("https://s1otgac0r.com/") == True
+
+
+def test_domain_biasa_tidak_tertangkap():
+    assert nama_domain_berbau_judol("https://sma-contoh.sch.id/berita") == False
+    assert nama_domain_berbau_judol("https://www.google.com/") == False
+
+
+def test_kata_judol_di_path_tidak_dihitung():
+    assert nama_domain_berbau_judol("https://sma-contoh.sch.id/slot-gacor") == False
+
+
+def test_domain_kosong_atau_rusak():
+    assert nama_domain_berbau_judol("") == False
+    assert nama_domain_berbau_judol(None) == False
+    assert nama_domain_berbau_judol("bukan url") == False

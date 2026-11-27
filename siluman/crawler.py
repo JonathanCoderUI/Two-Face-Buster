@@ -29,11 +29,27 @@ def host_dari(url):
     return host
 
 
-def situs_sama(a, b):
-    ha, hb = host_dari(a), host_dari(b)
-    if not ha or not hb:
+def situs_sama(host_a, host_b):
+    """Kembalikan True jika dua host berada di situs atau subdomain yang sama."""
+    if not host_a or not host_b:
         return False
-    return ha == hb or ha.endswith("." + hb) or hb.endswith("." + ha)
+
+    bersih_a = host_a.lower()
+    if bersih_a.startswith("www."):
+        bersih_a = bersih_a[4:]
+
+    bersih_b = host_b.lower()
+    if bersih_b.startswith("www."):
+        bersih_b = bersih_b[4:]
+
+    if bersih_a == bersih_b:
+        return True
+    if bersih_a.endswith("." + bersih_b):
+        return True
+    if bersih_b.endswith("." + bersih_a):
+        return True
+
+    return False
 
 
 async def ambil(session, url, persona, putaran):

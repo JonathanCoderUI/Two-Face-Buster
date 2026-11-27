@@ -12,12 +12,20 @@ from . import config  # Biar bisa akses PERSONA, TIMEOUT, dll
 
 
 def host_dari(url):
+    """Kembalikan nama host huruf kecil tanpa awalan www., atau None jika tidak ada."""
+
     try:
-        host = urlsplit(url).hostname or ""
+        host = urlsplit(url).hostname
     except ValueError:
-        return ""
+        return None
+
+    if host is None:
+        return None
+
+    host = host.lower()
     if host.startswith("www."):
         host = host[4:]
+
     return host
 
 

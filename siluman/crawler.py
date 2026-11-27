@@ -51,6 +51,7 @@ def situs_sama(host_a, host_b):
 
     return False
 
+
 def kunjungan_kosong(url, persona, putaran):
     """Buat struktur data kunjungan awal dengan nilai kosong sebelum permintaan dilakukan."""
     waktu_sekarang = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -66,6 +67,23 @@ def kunjungan_kosong(url, persona, putaran):
         "html": None,
         "catatan": None,
     }
+
+
+async def baca_isi(resp):
+    """Baca isi respons HTTP hingga batas ukuran konfigurasi lalu kembalikan teksnya."""
+    potongan_byte = bytearray()
+    batas = config.BATAS_UKURAN
+
+    async for chunk in resp.content.iter_chunked(65536):
+        sisa_kuota = batas - len(potongan_byte)
+        if sisa_kuota <= 0:
+            break
+        potongan_byte.extend(chunk[:sisa_kuota])
+
+    if not potongan_byte:
+        return ""
+
+    return potongan_byte.decode("utf-8", errors="replace")
 
 
 async def ambil(session, url, persona, putaran):

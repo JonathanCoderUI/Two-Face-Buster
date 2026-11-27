@@ -5,6 +5,7 @@
 import datetime
 
 from siluman import db
+from siluman.classifier import peluang_judol
 from siluman.fitur import (
     cari_teks_tersembunyi,
     ekstrak_teks,
@@ -41,7 +42,8 @@ LABEL_TIDAK_BISA_DICEK = "tidak_bisa_dicek"
 
 def nilai_url(versi, model=None):
     """Kembalikan dict skor, label, alasan, kemiripan, p_judol_browser, p_judol_googlebot untuk satu URL."""
-    # model baru dipakai Minggu 4 (classifier); versi ini hanya kata kunci.
+    # Skor dan label selalu dari poin kata kunci. Model (kalau ada) hanya mengisi
+    # p_judol_* sebagai pembanding, supaya angkanya bisa dibandingkan di dashboard.
     k_browser = versi.get("browser")
     k_googlebot = versi.get("googlebot")
     k_dari_google = versi.get("dari_google")
@@ -94,14 +96,20 @@ def nilai_url(versi, model=None):
     tambah_tanda_tersembunyi(alasan, daftar_kunjungan)
     tambah_tanda_skrip(alasan, daftar_kunjungan)
 
+    p_judol_browser = judol_browser
+    p_judol_googlebot = judol_googlebot
+    if model != None:
+        p_judol_browser = peluang_judol(model, ekstrak_teks_terlihat(k_browser.get("html")))
+        p_judol_googlebot = peluang_judol(model, ekstrak_teks_terlihat(k_googlebot.get("html")))
+
     skor = jumlah_poin(alasan)
     return {
         "skor": skor,
         "label": label_dari_skor(skor),
         "alasan": alasan,
         "kemiripan": nilai_kemiripan,
-        "p_judol_browser": judol_browser,
-        "p_judol_googlebot": judol_googlebot,
+        "p_judol_browser": p_judol_browser,
+        "p_judol_googlebot": p_judol_googlebot,
     }
 
 

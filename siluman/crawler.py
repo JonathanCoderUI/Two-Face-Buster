@@ -51,6 +51,22 @@ def situs_sama(host_a, host_b):
 
     return False
 
+def kunjungan_kosong(url, persona, putaran):
+    """Buat struktur data kunjungan awal dengan nilai kosong sebelum permintaan dilakukan."""
+    waktu_sekarang = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return {
+        "putaran": putaran,
+        "url": url,
+        "domain": host_dari(url),
+        "persona": persona,
+        "waktu": waktu_sekarang,
+        "status": None,
+        "url_akhir": url,
+        "redirect_ke": None,
+        "html": None,
+        "catatan": None,
+    }
+
 
 async def ambil(session, url, persona, putaran):
     """Lakukan satu permintaan HTTP GET tanpa redirect otomatis dan catat hasilnya."""

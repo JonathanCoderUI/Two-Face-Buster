@@ -2,13 +2,16 @@
 
 # Pemilik: Penjelajah. Rujukan: Panduan hlm. 16-21.
 
-from urllib.parse import urlsplit, urljoin
+
+from urllib.parse import urljoin, urlsplit
+import asyncio
+import datetime
+import zlib
 
 import aiohttp
-import zlib
-import datetime
 
-from . import config  # Biar bisa akses PERSONA, TIMEOUT, dll
+from . import config
+from . import db
 
 
 def host_dari(url):
@@ -279,12 +282,46 @@ async def kunjungi_url_persona(session, url, persona, putaran, cache_robots):
 
 async def scan(daftar_url, conn, putaran, jeda):
     """Kunjungi semua URL dengan tiga persona lalu simpan ke tabel kunjungan."""
-    # TODO 4 (Minggu 2):
-    # Kelompokkan URL per domain. Di dalam satu domain berurutan dan berjeda,
-    # antar-domain berjalan bersamaan dengan batas MAKS_DOMAIN_BERSAMAAN.
-    # Patuhi robots.txt, coba ulang tanpa cek SSL kalau sertifikat kedaluwarsa,
-    # jangan simpan cookie. Simpan tiap kunjungan lewat db.simpan_kunjungan.
-    ...
+    if jeda is None:
+        jeda_aktif = config.JEDA_PER_DOMAIN
+    else:
+        jeda_aktif = jeda
+
+    kelompok_domain = {}
+    for url in daftar_url:
+        host = host_dari(url)
+        if not host:
+            continue
+        if host not in kelompok_domain:
+            kelompok_domain[host] = []
+        if url not in kelompok_domain[host]:
+            kelompok_domain[host].append(url)
+
+    semaphore = asyncio.Semaphore(config.MAKS_DOMAIN_BERSAMAAN)
+    cache_robots = {}
+
+    async def proses_satu_domain(host_domain, daftar_url_domain):
+        async with semaphore:
+            sudah_ada_kunjungan = False
+            for url_item in daftar_url_domain:
+                for persona in config.URUTAN_PERSONA:
+                    if sudah_ada_kunjungan and jeda_aktif > 0:
+                        await asyncio.sleep(jeda_aktif)
+
+                    hasil = await kunjungi_url_persona(
+                        session, url_item, persona, putaran, cache_robots
+                    )
+                    db.simpan_kunjungan(conn, hasil)
+                    sudah_ada_kunjungan = True
+
+    cookie_jar = aiohttp.DummyCookieJar()
+    async with aiohttp.ClientSession(cookie_jar=cookie_jar) as session:
+        tugas = []
+        for host_domain, daftar_url_domain in kelompok_domain.items():
+            tugas.append(proses_satu_domain(host_domain, daftar_url_domain))
+
+        if tugas:
+            await asyncio.gather(*tugas)
 
 
 # TODO 5 (Minggu 4):

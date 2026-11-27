@@ -2,6 +2,15 @@
 
 # Pemilik: Pelapor.
 
-# TODO 1:
-# Fixture alamat_uji (scope session): nyalakan situs uji lewat jalankan_di_latar,
-# berikan alamatnya ke tes, lalu matikan server setelah semua tes selesai.
+import pytest
+
+from situs_uji.app import jalankan_di_latar
+
+
+@pytest.fixture(scope="session")
+def alamat_uji():
+    """Nyalakan situs uji sekali untuk seluruh sesi tes dan kembalikan alamatnya, misalnya http://127.0.0.1:51234."""
+    server, alamat = jalankan_di_latar()
+    yield alamat
+    server.shutdown()
+    server.server_close()

@@ -53,46 +53,45 @@ def situs_sama(host_a, host_b):
 
 
 async def ambil(session, url, persona, putaran):
-    """Satu kunjungan ke satu URL sebagai satu persona; galat dicatat, tidak dilempar."""
+    """Lakukan satu permintaan HTTP GET tanpa redirect otomatis dan catat hasilnya."""
+    data_persona = config.PERSONA[persona]
+    if isinstance(data_persona, dict):
+        headers = dict(data_persona)
+    else:
+        headers = {"User-Agent": str(data_persona)}
 
-    # 1. Ambil setelan dari config.py
-    headers = config.PERSONA[persona]
     timeout = aiohttp.ClientTimeout(total=config.TIMEOUT_DETIK)
 
-    # 2. Siapkan wadah kosong (biar kalau error, program nggak crash)
     status_http = None
     html_zlib = None
     url_akhir = url
     redirect_ke = None
     catatan = None
 
-    # 3. Tembak URL-nya!
     try:
-        # allow_redirects=False itu WAJIB, biar kita bisa nangkep redirect
         async with session.get(
             url, headers=headers, timeout=timeout, allow_redirects=False
         ) as resp:
             status_http = resp.status
-            teks_html = await resp.text()
+            teks_html = await resp.text(errors="replace")
 
-            # Kompres HTML-nya pakai zlib (sesuai skema database hlm. 5)
-            html_zlib = zlib.compress(teks_html.encode("utf-8"))
+            if teks_html:
+                html_zlib = zlib.compress(teks_html.encode("utf-8"))
 
-            # 4. Cek kalau ini redirect (status 3xx)
             if status_http in (301, 302, 303, 307, 308):
-                tujuan = resp.headers.get("Location", "")
-                # Kalau tujuan masih di situs yang sama, update url_akhir
-                if situs_sama(url, tujuan):
-                    url_akhir = tujuan
-                # Kalau ke situs lain, simpan di redirect_ke (jangan dikunjungi)
-                else:
-                    redirect_ke = tujuan
+                lokasi_mentah = resp.headers.get("Location", "")
+                if lokasi_mentah:
+                    tujuan_penuh = urljoin(url, lokasi_mentah)
+                    host_asal = host_dari(url)
+                    host_tujuan = host_dari(tujuan_penuh)
 
+                    if situs_sama(host_asal, host_tujuan):
+                        url_akhir = tujuan_penuh
+                    else:
+                        redirect_ke = tujuan_penuh
     except Exception as e:
-        # 5. Kalau timeout atau internet mati, catat pesannya
         catatan = str(e)
 
-    # 6. Kembalikan dalam bentuk dict (sesuai Panduan hlm. 7)
     waktu_sekarang = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     return {

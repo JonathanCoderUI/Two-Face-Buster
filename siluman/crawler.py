@@ -2,13 +2,14 @@
 
 # Pemilik: Penjelajah. Rujukan: Panduan hlm. 16-21.
 
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urljoin
 
 import aiohttp
 import zlib
 import datetime
 
 from . import config  # Biar bisa akses PERSONA, TIMEOUT, dll
+
 
 def host_dari(url):
     try:
@@ -19,15 +20,17 @@ def host_dari(url):
         host = host[4:]
     return host
 
+
 def situs_sama(a, b):
     ha, hb = host_dari(a), host_dari(b)
     if not ha or not hb:
         return False
     return ha == hb or ha.endswith("." + hb) or hb.endswith("." + ha)
 
+
 async def ambil(session, url, persona, putaran):
     """Satu kunjungan ke satu URL sebagai satu persona; galat dicatat, tidak dilempar."""
-    
+
     # 1. Ambil setelan dari config.py
     headers = config.PERSONA[persona]
     timeout = aiohttp.ClientTimeout(total=config.TIMEOUT_DETIK)
@@ -42,10 +45,12 @@ async def ambil(session, url, persona, putaran):
     # 3. Tembak URL-nya!
     try:
         # allow_redirects=False itu WAJIB, biar kita bisa nangkep redirect
-        async with session.get(url, headers=headers, timeout=timeout, allow_redirects=False) as resp:
+        async with session.get(
+            url, headers=headers, timeout=timeout, allow_redirects=False
+        ) as resp:
             status_http = resp.status
             teks_html = await resp.text()
-            
+
             # Kompres HTML-nya pakai zlib (sesuai skema database hlm. 5)
             html_zlib = zlib.compress(teks_html.encode("utf-8"))
 
@@ -58,14 +63,14 @@ async def ambil(session, url, persona, putaran):
                 # Kalau ke situs lain, simpan di redirect_ke (jangan dikunjungi)
                 else:
                     redirect_ke = tujuan
-                    
+
     except Exception as e:
         # 5. Kalau timeout atau internet mati, catat pesannya
         catatan = str(e)
 
     # 6. Kembalikan dalam bentuk dict (sesuai Panduan hlm. 7)
     waktu_sekarang = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    
+
     return {
         "putaran": putaran,
         "url": url,
@@ -76,8 +81,9 @@ async def ambil(session, url, persona, putaran):
         "url_akhir": url_akhir,
         "redirect_ke": redirect_ke,
         "html": html_zlib,
-        "catatan": catatan
+        "catatan": catatan,
     }
+
 
 async def scan(daftar_url, conn, putaran, jeda):
     """Kunjungi semua URL dengan tiga persona lalu simpan ke tabel kunjungan."""
@@ -87,6 +93,7 @@ async def scan(daftar_url, conn, putaran, jeda):
     # Patuhi robots.txt, coba ulang tanpa cek SSL kalau sertifikat kedaluwarsa,
     # jangan simpan cookie. Simpan tiap kunjungan lewat db.simpan_kunjungan.
     ...
+
 
 # TODO 5 (Minggu 4):
 # Ambil juga halaman selain beranda dari sitemap.xml dan link internal, maksimal 20 per situs.

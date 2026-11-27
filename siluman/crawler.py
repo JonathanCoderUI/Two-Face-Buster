@@ -13,6 +13,8 @@ import aiohttp
 from . import config
 from . import db
 
+from html.parser import HTMLParser
+import xml.etree.ElementTree as ET
 
 def host_dari(url):
     """Kembalikan nama host huruf kecil tanpa awalan www., atau None jika tidak ada."""
@@ -324,5 +326,115 @@ async def scan(daftar_url, conn, putaran, jeda):
             await asyncio.gather(*tugas)
 
 
-# TODO 5 (Minggu 4):
-# Ambil juga halaman selain beranda dari sitemap.xml dan link internal, maksimal 20 per situs.
+class _PengambilLinkHTML(HTMLParser):
+    """Kumpulkan nilai atribut href dari tag a di dalam dokumen HTML."""
+
+    def __init__(self):
+        super().__init__()
+        self.daftar_href = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() == "a":
+            for nama_atribut, nilai_atribut in attrs:
+                if nama_atribut and nama_atribut.lower() == "href" and nilai_atribut:
+                    self.daftar_href.append(nilai_atribut.strip())
+
+
+def _bersihkan_dan_validasi_url(url_asal, href_mentah, host_situs, url_terlarang):
+    """Ubah href menjadi URL http/https satu situs jika valid, atau kembalikan None."""
+    if not href_mentah:
+        return None
+    if href_mentah.startswith("#"):
+        return None
+
+    bawah = href_mentah.lower()
+    if bawah.startswith(("mailto:", "javascript:", "tel:", "data:")):
+        return None
+
+    url_gabungan = urljoin(url_asal, href_mentah)
+    pecahan = urlsplit(url_gabungan)
+    if pecahan.scheme not in ("http", "https"):
+        return None
+
+    url_bersih = pecahan._replace(fragment="").geturl()
+    if not situs_sama(host_situs, host_dari(url_bersih)):
+        return None
+    if url_bersih in url_terlarang:
+        return None
+
+    return url_bersih
+
+
+async def kumpulkan_halaman_tambahan(session, url_beranda, maks_halaman=20):
+    """Ambil maksimal 20 URL internal tambahan dari sitemap.xml dan link HTML situs."""
+    host_situs = host_dari(url_beranda)
+    pecahan_beranda = urlsplit(url_beranda)
+    if not host_situs or not pecahan_beranda.scheme or not pecahan_beranda.netloc:
+        return []
+
+    url_awal_bersih = pecahan_beranda._replace(fragment="").geturl()
+    terkumpul = []
+    terlihat = {url_awal_bersih}
+    timeout = aiohttp.ClientTimeout(total=config.TIMEOUT_DETIK)
+
+    async def ambil_teks_aman(url_target):
+        for setelan_ssl in (None, False):
+            try:
+                if setelan_ssl is None:
+                    async with session.get(
+                        url_target, timeout=timeout, allow_redirects=True
+                    ) as resp:
+                        if resp.status == 200:
+                            return await baca_isi(resp)
+                        return ""
+                else:
+                    async with session.get(
+                        url_target,
+                        timeout=timeout,
+                        allow_redirects=True,
+                        ssl=False,
+                    ) as resp:
+                        if resp.status == 200:
+                            return await baca_isi(resp)
+                        return ""
+            except Exception:
+                if setelan_ssl is False:
+                    return ""
+        return ""
+
+    # 1. Coba ambil dari sitemap.xml
+    url_sitemap = f"{pecahan_beranda.scheme}://{pecahan_beranda.netloc}/sitemap.xml"
+    teks_sitemap = await ambil_teks_aman(url_sitemap)
+    if teks_sitemap and len(terkumpul) < maks_halaman:
+        try:
+            akar_xml = ET.fromstring(teks_sitemap)
+            for elemen in akar_xml.iter():
+                if elemen.tag.endswith("loc") and elemen.text:
+                    calon = _bersihkan_dan_validasi_url(
+                        url_sitemap, elemen.text.strip(), host_situs, terlihat
+                    )
+                    if calon:
+                        terkumpul.append(calon)
+                        terlihat.add(calon)
+                        if len(terkumpul) >= maks_halaman:
+                            break
+        except ET.ParseError:
+            pass
+
+    # 2. Lengkapi dari link internal di halaman beranda jika masih kurang
+    if len(terkumpul) < maks_halaman:
+        teks_html = await ambil_teks_aman(url_beranda)
+        if teks_html:
+            parser_html = _PengambilLinkHTML()
+            parser_html.feed(teks_html)
+            for href_item in parser_html.daftar_href:
+                calon = _bersihkan_dan_validasi_url(
+                    url_beranda, href_item, host_situs, terlihat
+                )
+                if calon:
+                    terkumpul.append(calon)
+                    terlihat.add(calon)
+                    if len(terkumpul) >= maks_halaman:
+                        break
+
+    return terkumpul

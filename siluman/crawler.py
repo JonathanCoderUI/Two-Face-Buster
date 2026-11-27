@@ -107,7 +107,7 @@ async def ambil(session, url, persona, putaran):
             url, headers=headers, timeout=timeout, allow_redirects=False
         ) as resp:
             status_http = resp.status
-            teks_html = await resp.text(errors="replace")
+            teks_html = await baca_isi(resp)
 
             if teks_html:
                 html_zlib = zlib.compress(teks_html.encode("utf-8"))
@@ -140,6 +140,66 @@ async def ambil(session, url, persona, putaran):
         "html": html_zlib,
         "catatan": catatan,
     }
+
+
+async def boleh_kunjungi_robots(session, url, persona, cache_robots):
+    """Periksa apakah URL diizinkan oleh robots.txt untuk persona yang dipakai."""
+    host = host_dari(url)
+    if not host:
+        return False
+
+    parsed = urlsplit(url)
+    if not parsed.scheme:
+        return False
+
+    url_robots = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+    if url_robots not in cache_robots:
+        aturan = {}
+        try:
+            timeout = aiohttp.ClientTimeout(total=config.TIMEOUT_DETIK)
+            async with session.get(url_robots, timeout=timeout, allow_redirects=True) as resp:
+                if resp.status == 200:
+                    teks_robots = await baca_isi(resp)
+                    agent_aktif = "*"
+                    for baris in teks_robots.splitlines():
+                        bersih = baris.split("#", 1)[0].strip()
+                        if not bersih:
+                            continue
+                        if ":" not in bersih:
+                            continue
+                        kunci, nilai = bersih.split(":", 1)
+                        kunci = kunci.strip().lower()
+                        nilai = nilai.strip()
+                        if kunci == "user-agent":
+                            agent_aktif = nilai.lower()
+                            if agent_aktif not in aturan:
+                                aturan[agent_aktif] = []
+                        elif kunci == "disallow" and nilai:
+                            if agent_aktif not in aturan:
+                                aturan[agent_aktif] = []
+                            aturan[agent_aktif].append(nilai)
+        except Exception:
+            aturan = {}
+        cache_robots[url_robots] = aturan
+
+    aturan_situs = cache_robots[url_robots]
+    daftar_larangan = []
+    if "*" in aturan_situs:
+        daftar_larangan.extend(aturan_situs["*"])
+
+    ua_persona = str(config.PERSONA[persona].get("User-Agent", "")).lower() if isinstance(config.PERSONA[persona], dict) else str(config.PERSONA[persona]).lower()
+    for agen, path_dilarang in aturan_situs.items():
+        if agen != "*" and agen in ua_persona:
+            daftar_larangan.extend(path_dilarang)
+
+    path_url = parsed.path or "/"
+    for prefix_larangan in daftar_larangan:
+        if prefix_larangan == "/":
+            return False
+        if path_url.startswith(prefix_larangan):
+            return False
+
+    return True
 
 
 async def scan(daftar_url, conn, putaran, jeda):

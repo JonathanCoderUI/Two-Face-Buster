@@ -202,6 +202,81 @@ async def boleh_kunjungi_robots(session, url, persona, cache_robots):
     return True
 
 
+async def kunjungi_url_persona(session, url, persona, putaran, cache_robots):
+    """Kunjungi satu URL untuk satu persona dengan dukungan robots.txt, redirect, dan retry SSL."""
+    diizinkan = await boleh_kunjungi_robots(session, url, persona, cache_robots)
+    if not diizinkan:
+        data_blokir = kunjungan_kosong(url, persona, putaran)
+        data_blokir["catatan"] = "diblokir robots.txt"
+        return data_blokir
+
+    url_sekarang = url
+    lompatan = 0
+    hasil_terakhir = None
+
+    while True:
+        hasil = await ambil(session, url_sekarang, persona, putaran)
+
+        if hasil["catatan"] and ("SSL" in hasil["catatan"] or "certificate" in hasil["catatan"].lower()):
+            data_persona = config.PERSONA[persona]
+            if isinstance(data_persona, dict):
+                headers = dict(data_persona)
+            else:
+                headers = {"User-Agent": str(data_persona)}
+
+            timeout = aiohttp.ClientTimeout(total=config.TIMEOUT_DETIK)
+            try:
+                async with session.get(
+                    url_sekarang,
+                    headers=headers,
+                    timeout=timeout,
+                    allow_redirects=False,
+                    ssl=False,
+                ) as resp_ssl:
+                    status_ssl = resp_ssl.status
+                    teks_ssl = await baca_isi(resp_ssl)
+                    html_ssl = None
+                    if teks_ssl:
+                        html_ssl = zlib.compress(teks_ssl.encode("utf-8"))
+
+                    url_akhir_ssl = url_sekarang
+                    redirect_ke_ssl = None
+                    if status_ssl in (301, 302, 303, 307, 308):
+                        lokasi_mentah = resp_ssl.headers.get("Location", "")
+                        if lokasi_mentah:
+                            tujuan_penuh = urljoin(url_sekarang, lokasi_mentah)
+                            if situs_sama(host_dari(url_sekarang), host_dari(tujuan_penuh)):
+                                url_akhir_ssl = tujuan_penuh
+                            else:
+                                redirect_ke_ssl = tujuan_penuh
+
+                    hasil["status"] = status_ssl
+                    hasil["html"] = html_ssl
+                    hasil["url_akhir"] = url_akhir_ssl
+                    hasil["redirect_ke"] = redirect_ke_ssl
+                    hasil["catatan"] = "retry ssl=False"
+            except Exception as e_ssl:
+                hasil["catatan"] = f"ssl retry gagal: {e_ssl}"
+
+        hasil["url"] = url
+        hasil["domain"] = host_dari(url)
+        hasil_terakhir = hasil
+
+        if hasil["redirect_ke"] is not None:
+            break
+
+        if hasil["url_akhir"] != url_sekarang:
+            if lompatan >= config.MAKS_LOMPATAN_REDIRECT:
+                hasil_terakhir["catatan"] = "batas lompatan redirect tercapai"
+                break
+            lompatan = lompatan + 1
+            url_sekarang = hasil["url_akhir"]
+        else:
+            break
+
+    return hasil_terakhir
+
+
 async def scan(daftar_url, conn, putaran, jeda):
     """Kunjungi semua URL dengan tiga persona lalu simpan ke tabel kunjungan."""
     # TODO 4 (Minggu 2):

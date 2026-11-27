@@ -1,440 +1,182 @@
-"""Mengunjungi setiap URL sebagai tiga persona dan menyimpan hasilnya ke tabel kunjungan."""
+"""Modul Penjelajah (crawler): mengambil halaman dengan 3 persona secara sopan."""
 
-# Pemilik: Penjelajah. Rujukan: Panduan hlm. 16-21.
-
-
-from urllib.parse import urljoin, urlsplit
 import asyncio
-import datetime
-import zlib
+from urllib.parse import urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 
 import aiohttp
 
-from . import config
-from . import db
+from siluman import config, db
 
-from html.parser import HTMLParser
-import xml.etree.ElementTree as ET
-
-def host_dari(url):
-    """Kembalikan nama host huruf kecil tanpa awalan www., atau None jika tidak ada."""
-
-    try:
-        host = urlsplit(url).hostname
-    except ValueError:
-        return None
-
-    if host is None:
-        return None
-
-    host = host.lower()
-    if host.startswith("www."):
-        host = host[4:]
-
-    return host
-
-
-def situs_sama(host_a, host_b):
-    """Kembalikan True jika dua host berada di situs atau subdomain yang sama."""
-    if not host_a or not host_b:
-        return False
-
-    bersih_a = host_a.lower()
-    if bersih_a.startswith("www."):
-        bersih_a = bersih_a[4:]
-
-    bersih_b = host_b.lower()
-    if bersih_b.startswith("www."):
-        bersih_b = bersih_b[4:]
-
-    if bersih_a == bersih_b:
-        return True
-    if bersih_a.endswith("." + bersih_b):
-        return True
-    if bersih_b.endswith("." + bersih_a):
-        return True
-
-    return False
+STATUS_REDIRECT = [301, 302, 303, 307, 308]
 
 
 def kunjungan_kosong(url, persona, putaran):
-    """Buat struktur data kunjungan awal dengan nilai kosong sebelum permintaan dilakukan."""
-    waktu_sekarang = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    """Membuat struktur data kunjungan awal dengan nilai default/kosong."""
     return {
         "putaran": putaran,
         "url": url,
         "domain": host_dari(url),
         "persona": persona,
-        "waktu": waktu_sekarang,
+        "waktu": "",
         "status": None,
-        "url_akhir": url,
+        "url_akhir": None,
         "redirect_ke": None,
         "html": None,
         "catatan": None,
     }
 
 
-async def baca_isi(resp):
-    """Baca isi respons HTTP hingga batas ukuran konfigurasi lalu kembalikan teksnya."""
-    potongan_byte = bytearray()
-    batas = config.BATAS_UKURAN
-
-    async for chunk in resp.content.iter_chunked(65536):
-        sisa_kuota = batas - len(potongan_byte)
-        if sisa_kuota <= 0:
-            break
-        potongan_byte.extend(chunk[:sisa_kuota])
-
-    if not potongan_byte:
+def host_dari(url):
+    """Mengambil hostname tanpa awalan 'www.' dari URL; mengembalikan string kosong jika gagal."""
+    if not url:
         return ""
-
-    return potongan_byte.decode("utf-8", errors="replace")
-
-
-async def ambil(session, url, persona, putaran):
-    """Lakukan satu permintaan HTTP GET tanpa redirect otomatis dan catat hasilnya."""
-    data_persona = config.PERSONA[persona]
-    if isinstance(data_persona, dict):
-        headers = dict(data_persona)
-    else:
-        headers = {"User-Agent": str(data_persona)}
-
-    timeout = aiohttp.ClientTimeout(total=config.TIMEOUT_DETIK)
-
-    status_http = None
-    html_zlib = None
-    url_akhir = url
-    redirect_ke = None
-    catatan = None
-
     try:
-        async with session.get(
-            url, headers=headers, timeout=timeout, allow_redirects=False
-        ) as resp:
-            status_http = resp.status
-            teks_html = await baca_isi(resp)
-
-            if teks_html:
-                html_zlib = zlib.compress(teks_html.encode("utf-8"))
-
-            if status_http in (301, 302, 303, 307, 308):
-                lokasi_mentah = resp.headers.get("Location", "")
-                if lokasi_mentah:
-                    tujuan_penuh = urljoin(url, lokasi_mentah)
-                    host_asal = host_dari(url)
-                    host_tujuan = host_dari(tujuan_penuh)
-
-                    if situs_sama(host_asal, host_tujuan):
-                        url_akhir = tujuan_penuh
-                    else:
-                        redirect_ke = tujuan_penuh
-    except Exception as e:
-        catatan = str(e)
-
-    waktu_sekarang = datetime.datetime.now(datetime.timezone.utc).isoformat()
-
-    return {
-        "putaran": putaran,
-        "url": url,
-        "domain": host_dari(url),
-        "persona": persona,
-        "waktu": waktu_sekarang,
-        "status": status_http,
-        "url_akhir": url_akhir,
-        "redirect_ke": redirect_ke,
-        "html": html_zlib,
-        "catatan": catatan,
-    }
+        host = urlparse(url).hostname
+    except ValueError:
+        return ""
+    if host is None:
+        return ""
+    host = host.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
 
 
-async def boleh_kunjungi_robots(session, url, persona, cache_robots):
-    """Periksa apakah URL diizinkan oleh robots.txt untuk persona yang dipakai."""
-    host = host_dari(url)
-    if not host:
+def situs_sama(host_a, host_b):
+    """Mengembalikan True jika dua host berada pada situs/domain yang sama (termasuk subdomain)."""
+    if host_a == "" or host_b == "":
         return False
-
-    parsed = urlsplit(url)
-    if not parsed.scheme:
-        return False
-
-    url_robots = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
-    if url_robots not in cache_robots:
-        aturan = {}
-        try:
-            timeout = aiohttp.ClientTimeout(total=config.TIMEOUT_DETIK)
-            async with session.get(url_robots, timeout=timeout, allow_redirects=True) as resp:
-                if resp.status == 200:
-                    teks_robots = await baca_isi(resp)
-                    agent_aktif = "*"
-                    for baris in teks_robots.splitlines():
-                        bersih = baris.split("#", 1)[0].strip()
-                        if not bersih:
-                            continue
-                        if ":" not in bersih:
-                            continue
-                        kunci, nilai = bersih.split(":", 1)
-                        kunci = kunci.strip().lower()
-                        nilai = nilai.strip()
-                        if kunci == "user-agent":
-                            agent_aktif = nilai.lower()
-                            if agent_aktif not in aturan:
-                                aturan[agent_aktif] = []
-                        elif kunci == "disallow" and nilai:
-                            if agent_aktif not in aturan:
-                                aturan[agent_aktif] = []
-                            aturan[agent_aktif].append(nilai)
-        except Exception:
-            aturan = {}
-        cache_robots[url_robots] = aturan
-
-    aturan_situs = cache_robots[url_robots]
-    daftar_larangan = []
-    if "*" in aturan_situs:
-        daftar_larangan.extend(aturan_situs["*"])
-
-    ua_persona = str(config.PERSONA[persona].get("User-Agent", "")).lower() if isinstance(config.PERSONA[persona], dict) else str(config.PERSONA[persona]).lower()
-    for agen, path_dilarang in aturan_situs.items():
-        if agen != "*" and agen in ua_persona:
-            daftar_larangan.extend(path_dilarang)
-
-    path_url = parsed.path or "/"
-    for prefix_larangan in daftar_larangan:
-        if prefix_larangan == "/":
-            return False
-        if path_url.startswith(prefix_larangan):
-            return False
-
-    return True
+    if host_a == host_b:
+        return True
+    if host_a.endswith("." + host_b) or host_b.endswith("." + host_a):
+        return True
+    return False
 
 
-async def kunjungi_url_persona(session, url, persona, putaran, cache_robots):
-    """Kunjungi satu URL untuk satu persona dengan dukungan robots.txt, redirect, dan retry SSL."""
-    diizinkan = await boleh_kunjungi_robots(session, url, persona, cache_robots)
-    if not diizinkan:
-        data_blokir = kunjungan_kosong(url, persona, putaran)
-        data_blokir["catatan"] = "diblokir robots.txt"
-        return data_blokir
+async def baca_isi(resp):
+    """Membaca body respons maksimal BATAS_UKURAN byte lalu mendekodekannya menjadi teks."""
+    potongan = []
+    total = 0
+    async for bagian in resp.content.iter_chunked(65536):
+        potongan.append(bagian)
+        total = total + len(bagian)
+        if total >= config.BATAS_UKURAN:
+            break
+    data = b"".join(potongan)
+    charset = resp.charset
+    if charset is None:
+        charset = "utf-8"
+    try:
+        return data.decode(charset, errors="replace")
+    except LookupError:
+        return data.decode("utf-8", errors="replace")
 
-    url_sekarang = url
+
+async def ambil(session, url, persona, putaran, cek_ssl=True):
+    """Melakukan satu kunjungan ke satu URL sebagai satu persona; mencatat galat tanpa melempar."""
+    hasil = kunjungan_kosong(url, persona, putaran)
+    header = config.PERSONA[persona]
+    sekarang = url
     lompatan = 0
-    hasil_terakhir = None
-
-    while True:
-        hasil = await ambil(session, url_sekarang, persona, putaran)
-
-        if hasil["catatan"] and ("SSL" in hasil["catatan"] or "certificate" in hasil["catatan"].lower()):
-            data_persona = config.PERSONA[persona]
-            if isinstance(data_persona, dict):
-                headers = dict(data_persona)
-            else:
-                headers = {"User-Agent": str(data_persona)}
-
-            timeout = aiohttp.ClientTimeout(total=config.TIMEOUT_DETIK)
-            try:
-                async with session.get(
-                    url_sekarang,
-                    headers=headers,
-                    timeout=timeout,
-                    allow_redirects=False,
-                    ssl=False,
-                ) as resp_ssl:
-                    status_ssl = resp_ssl.status
-                    teks_ssl = await baca_isi(resp_ssl)
-                    html_ssl = None
-                    if teks_ssl:
-                        html_ssl = zlib.compress(teks_ssl.encode("utf-8"))
-
-                    url_akhir_ssl = url_sekarang
-                    redirect_ke_ssl = None
-                    if status_ssl in (301, 302, 303, 307, 308):
-                        lokasi_mentah = resp_ssl.headers.get("Location", "")
-                        if lokasi_mentah:
-                            tujuan_penuh = urljoin(url_sekarang, lokasi_mentah)
-                            if situs_sama(host_dari(url_sekarang), host_dari(tujuan_penuh)):
-                                url_akhir_ssl = tujuan_penuh
-                            else:
-                                redirect_ke_ssl = tujuan_penuh
-
-                    hasil["status"] = status_ssl
-                    hasil["html"] = html_ssl
-                    hasil["url_akhir"] = url_akhir_ssl
-                    hasil["redirect_ke"] = redirect_ke_ssl
-                    hasil["catatan"] = "retry ssl=False"
-            except Exception as e_ssl:
-                hasil["catatan"] = f"ssl retry gagal: {e_ssl}"
-
-        hasil["url"] = url
-        hasil["domain"] = host_dari(url)
-        hasil_terakhir = hasil
-
-        if hasil["redirect_ke"] is not None:
-            break
-
-        if hasil["url_akhir"] != url_sekarang:
-            if lompatan >= config.MAKS_LOMPATAN_REDIRECT:
-                hasil_terakhir["catatan"] = "batas lompatan redirect tercapai"
-                break
-            lompatan = lompatan + 1
-            url_sekarang = hasil["url_akhir"]
-        else:
-            break
-
-    return hasil_terakhir
+    selesai = False
+    try:
+        while not selesai:
+            async with session.get(
+                sekarang,
+                headers=header,
+                allow_redirects=False,
+                ssl=cek_ssl,
+            ) as resp:
+                hasil["status"] = resp.status
+                lokasi = resp.headers.get("Location")
+                if resp.status in STATUS_REDIRECT and lokasi is not None:
+                    tujuan = urljoin(sekarang, lokasi)
+                    if not situs_sama(host_dari(tujuan), hasil["domain"]):
+                        hasil["redirect_ke"] = tujuan
+                        selesai = True
+                    elif lompatan >= config.MAKS_LOMPATAN_REDIRECT:
+                        hasil["catatan"] = "redirect berputar"
+                        selesai = True
+                    else:
+                        lompatan = lompatan + 1
+                        sekarang = tujuan
+                else:
+                    hasil["html"] = await baca_isi(resp)
+                    selesai = True
+        hasil["url_akhir"] = sekarang
+    except aiohttp.ClientSSLError:
+        hasil["catatan"] = "ssl"
+    except asyncio.TimeoutError:
+        hasil["catatan"] = "timeout"
+    except aiohttp.ClientError as e:
+        hasil["catatan"] = type(e).__name__ + ": " + str(e)
+    except ValueError as e:
+        hasil["catatan"] = "url tidak valid: " + str(e)
+    return hasil
 
 
-async def scan(daftar_url, conn, putaran, jeda):
-    """Kunjungi semua URL dengan tiga persona lalu simpan ke tabel kunjungan."""
-    if jeda is None:
-        jeda_aktif = config.JEDA_PER_DOMAIN
+async def baca_robots(session, url, putaran):
+    """Mengambil dan mem-parse robots.txt situs; mengizinkan semua jika tidak tersedia."""
+    k = await ambil(session, urljoin(url, "/robots.txt"), "browser", putaran, cek_ssl=False)
+    robots = RobotFileParser()
+    if k["status"] == 200 and k["html"] is not None:
+        robots.parse(k["html"].splitlines())
     else:
-        jeda_aktif = jeda
+        robots.parse([])
+    return robots
 
-    kelompok_domain = {}
+
+async def jelajahi_domain(session, daftar, semafor, conn, putaran, jeda):
+    """Menjelajahi seluruh URL pada satu domain secara berurutan dengan jeda antar-permintaan."""
+    async with semafor:
+        robots = await baca_robots(session, daftar[0], putaran)
+        await asyncio.sleep(jeda)
+        for url in daftar:
+            boleh = robots.can_fetch("*", url)
+            for persona in config.URUTAN_PERSONA:
+                if boleh:
+                    hasil = await ambil(session, url, persona, putaran)
+                    if hasil["catatan"] == "ssl":
+                        hasil = await ambil(session, url, persona, putaran, cek_ssl=False)
+                        if hasil["catatan"] is None:
+                            hasil["catatan"] = "sertifikat SSL tidak valid"
+                    await asyncio.sleep(jeda)
+                else:
+                    hasil = kunjungan_kosong(url, persona, putaran)
+                    hasil["catatan"] = "dilarang robots.txt"
+                db.simpan_kunjungan(conn, hasil)
+
+
+async def scan(daftar_url, conn, putaran, jeda=config.JEDA_PER_DOMAIN):
+    """Menjalankan pemindaian daftar URL lintas domain secara asinkron."""
+    per_domain = {}
     for url in daftar_url:
-        host = host_dari(url)
-        if not host:
-            continue
-        if host not in kelompok_domain:
-            kelompok_domain[host] = []
-        if url not in kelompok_domain[host]:
-            kelompok_domain[host].append(url)
+        domain = host_dari(url)
+        if domain not in per_domain:
+            per_domain[domain] = []
+        per_domain[domain].append(url)
 
-    semaphore = asyncio.Semaphore(config.MAKS_DOMAIN_BERSAMAAN)
-    cache_robots = {}
-
-    async def proses_satu_domain(host_domain, daftar_url_domain):
-        async with semaphore:
-            sudah_ada_kunjungan = False
-            for url_item in daftar_url_domain:
-                for persona in config.URUTAN_PERSONA:
-                    if sudah_ada_kunjungan and jeda_aktif > 0:
-                        await asyncio.sleep(jeda_aktif)
-
-                    hasil = await kunjungi_url_persona(
-                        session, url_item, persona, putaran, cache_robots
-                    )
-                    db.simpan_kunjungan(conn, hasil)
-                    sudah_ada_kunjungan = True
-
-    cookie_jar = aiohttp.DummyCookieJar()
-    async with aiohttp.ClientSession(cookie_jar=cookie_jar) as session:
-        tugas = []
-        for host_domain, daftar_url_domain in kelompok_domain.items():
-            tugas.append(proses_satu_domain(host_domain, daftar_url_domain))
-
-        if tugas:
-            await asyncio.gather(*tugas)
-
-
-class _PengambilLinkHTML(HTMLParser):
-    """Kumpulkan nilai atribut href dari tag a di dalam dokumen HTML."""
-
-    def __init__(self):
-        super().__init__()
-        self.daftar_href = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag.lower() == "a":
-            for nama_atribut, nilai_atribut in attrs:
-                if nama_atribut and nama_atribut.lower() == "href" and nilai_atribut:
-                    self.daftar_href.append(nilai_atribut.strip())
-
-
-def _bersihkan_dan_validasi_url(url_asal, href_mentah, host_situs, url_terlarang):
-    """Ubah href menjadi URL http/https satu situs jika valid, atau kembalikan None."""
-    if not href_mentah:
-        return None
-    if href_mentah.startswith("#"):
-        return None
-
-    bawah = href_mentah.lower()
-    if bawah.startswith(("mailto:", "javascript:", "tel:", "data:")):
-        return None
-
-    url_gabungan = urljoin(url_asal, href_mentah)
-    pecahan = urlsplit(url_gabungan)
-    if pecahan.scheme not in ("http", "https"):
-        return None
-
-    url_bersih = pecahan._replace(fragment="").geturl()
-    if not situs_sama(host_situs, host_dari(url_bersih)):
-        return None
-    if url_bersih in url_terlarang:
-        return None
-
-    return url_bersih
-
-
-async def kumpulkan_halaman_tambahan(session, url_beranda, maks_halaman=20):
-    """Ambil maksimal 20 URL internal tambahan dari sitemap.xml dan link HTML situs."""
-    host_situs = host_dari(url_beranda)
-    pecahan_beranda = urlsplit(url_beranda)
-    if not host_situs or not pecahan_beranda.scheme or not pecahan_beranda.netloc:
-        return []
-
-    url_awal_bersih = pecahan_beranda._replace(fragment="").geturl()
-    terkumpul = []
-    terlihat = {url_awal_bersih}
+    semafor = asyncio.Semaphore(config.MAKS_DOMAIN_BERSAMAAN)
     timeout = aiohttp.ClientTimeout(total=config.TIMEOUT_DETIK)
 
-    async def ambil_teks_aman(url_target):
-        for setelan_ssl in (None, False):
-            try:
-                if setelan_ssl is None:
-                    async with session.get(
-                        url_target, timeout=timeout, allow_redirects=True
-                    ) as resp:
-                        if resp.status == 200:
-                            return await baca_isi(resp)
-                        return ""
-                else:
-                    async with session.get(
-                        url_target,
-                        timeout=timeout,
-                        allow_redirects=True,
-                        ssl=False,
-                    ) as resp:
-                        if resp.status == 200:
-                            return await baca_isi(resp)
-                        return ""
-            except Exception:
-                if setelan_ssl is False:
-                    return ""
-        return ""
-
-    # 1. Coba ambil dari sitemap.xml
-    url_sitemap = f"{pecahan_beranda.scheme}://{pecahan_beranda.netloc}/sitemap.xml"
-    teks_sitemap = await ambil_teks_aman(url_sitemap)
-    if teks_sitemap and len(terkumpul) < maks_halaman:
-        try:
-            akar_xml = ET.fromstring(teks_sitemap)
-            for elemen in akar_xml.iter():
-                if elemen.tag.endswith("loc") and elemen.text:
-                    calon = _bersihkan_dan_validasi_url(
-                        url_sitemap, elemen.text.strip(), host_situs, terlihat
-                    )
-                    if calon:
-                        terkumpul.append(calon)
-                        terlihat.add(calon)
-                        if len(terkumpul) >= maks_halaman:
-                            break
-        except ET.ParseError:
-            pass
-
-    # 2. Lengkapi dari link internal di halaman beranda jika masih kurang
-    if len(terkumpul) < maks_halaman:
-        teks_html = await ambil_teks_aman(url_beranda)
-        if teks_html:
-            parser_html = _PengambilLinkHTML()
-            parser_html.feed(teks_html)
-            for href_item in parser_html.daftar_href:
-                calon = _bersihkan_dan_validasi_url(
-                    url_beranda, href_item, host_situs, terlihat
+    async with aiohttp.ClientSession(
+        timeout=timeout,
+        cookie_jar=aiohttp.DummyCookieJar(),
+    ) as session:
+        tugas = []
+        for domain in per_domain:
+            tugas.append(
+                asyncio.create_task(
+                    jelajahi_domain(session, per_domain[domain], semafor, conn, putaran, jeda)
                 )
-                if calon:
-                    terkumpul.append(calon)
-                    terlihat.add(calon)
-                    if len(terkumpul) >= maks_halaman:
-                        break
-
-    return terkumpul
+            )
+        selesai = 0
+        for berikutnya in asyncio.as_completed(tugas):
+            try:
+                await berikutnya
+            except Exception as e:
+                print("Galat tak terduga:", repr(e))
+            selesai = selesai + 1
+            if selesai % 50 == 0 or selesai == len(tugas):
+                print("Selesai", selesai, "dari", len(tugas), "domain")

@@ -59,7 +59,8 @@ async def baca_isi(resp):
         total = total + len(bagian)
         if total >= config.BATAS_UKURAN:
             break
-    data = b"".join(potongan)
+    # Potongan terakhir bisa membuat total melewati batas, jadi dipotong lagi di sini.
+    data = b"".join(potongan)[: config.BATAS_UKURAN]
     charset = resp.charset
     if charset == None:
         charset = "utf-8"

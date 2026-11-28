@@ -18,4 +18,5 @@ async def coba():
             print(persona, k["status"], k["redirect_ke"], k["html"] == None)
 
 
-asyncio.run(coba())
+if __name__ == "__main__":
+    asyncio.run(coba())
